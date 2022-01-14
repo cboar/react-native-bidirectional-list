@@ -17,6 +17,14 @@ const BidirectionalList = NativeModules.BidirectionalList
       }
     );
 
-export function multiply(a: number, b: number): Promise<number> {
-  return BidirectionalList.multiply(a, b);
+export function enableMVCP(
+  viewTag: number,
+  autoscrollToTopThreshold: number,
+  minIndexForVisible: number
+) {
+  return BidirectionalList.enableMVCP(
+    viewTag,
+    autoscrollToTopThreshold,
+    minIndexForVisible
+  );
 }
