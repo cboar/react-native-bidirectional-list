@@ -2,16 +2,8 @@ package com.reactnativebidirectionallist
 
 import android.util.Log
 import android.view.View
-import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactContextBaseJavaModule
-import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.uimanager.IllegalViewOperationException
-import com.facebook.react.uimanager.NativeViewHierarchyManager
-import com.facebook.react.uimanager.ReactShadowNode
-import com.facebook.react.uimanager.UIBlock
-import com.facebook.react.uimanager.UIImplementation
-import com.facebook.react.uimanager.UIManagerModule
-import com.facebook.react.uimanager.UIManagerModuleListener
+import com.facebook.react.bridge.*
+import com.facebook.react.uimanager.*
 import com.facebook.react.views.scroll.ReactScrollView
 import com.facebook.react.views.view.ReactViewGroup
 import java.util.HashMap
@@ -34,22 +26,21 @@ class BidirectionalListModule(val reactContext: ReactApplicationContext) : React
     uiManagerModule: UIManagerModule,
     callback: (uiHolder: ScrollViewUIHolder, scrollView: ReactScrollView) -> Unit
   ){
-    for((viewTag, uiHolder) in uiHolders){
+    uiHolders.entries.removeIf { (viewTag, uiHolder) ->
       try {
         val scrollView = uiManagerModule.resolveView(viewTag) as ReactScrollView
         callback.invoke(uiHolder, scrollView)
+        false /* do not remove item */
       } catch(e: IllegalViewOperationException) {
-        uiHolders.remove(viewTag)
-      } catch(e: TypeCastException){
-        /* skip this item */
+        true /* could not find view, remove this item */
       }
     }
   }
 
   fun preWillDispatchViewUpdates(uiManagerModule: UIManagerModule){
-    iterateScrollViews(uiManagerModule){ uiHolder, scrollView ->
+    iterateScrollViews(uiManagerModule, fun(uiHolder, scrollView) {
 
-      val content = scrollView.getChildAt(0) as ReactViewGroup
+      val content = scrollView.getChildAt(0) as ReactViewGroup? ?: return
       uiHolder.currentScrollY = scrollView.scrollY
       for (ii in uiHolder.minIndexForVisible..content.childCount) {
         val subview = content.getChildAt(ii)
@@ -60,43 +51,42 @@ class BidirectionalListModule(val reactContext: ReactApplicationContext) : React
         }
       }
 
-    }
+    })
   }
 
   fun onLayoutUpdated(uiManagerModule: UIManagerModule){
-    iterateScrollViews(uiManagerModule){ uiHolder, scrollView ->
+    iterateScrollViews(uiManagerModule, fun(uiHolder, scrollView) {
 
-      uiHolder.firstVisibleView?.let {
-        val deltaY = it.top - uiHolder.prevFirstVisibleTop
-        if(Math.abs(deltaY) > 1){
-          val isWithinThreshold = uiHolder.currentScrollY <= uiHolder.autoscrollToTopThreshold
-          scrollView.setScrollY(uiHolder.currentScrollY + deltaY)
-          // If the offset WAS within the threshold of the start, animate to the start.
-          if(isWithinThreshold){
-            scrollView.smoothScrollTo(scrollView.scrollX, 0)
-          }
+      val view = uiHolder.firstVisibleView ?: return
+      val deltaY = view.top - uiHolder.prevFirstVisibleTop
+      if(Math.abs(deltaY) > 1){
+        val isWithinThreshold = uiHolder.currentScrollY <= uiHolder.autoscrollToTopThreshold
+        scrollView.setScrollY(uiHolder.currentScrollY + deltaY)
+        // If the offset WAS within the threshold of the start, animate to the start.
+        if(isWithinThreshold){
+          scrollView.smoothScrollTo(scrollView.scrollX, 0)
         }
       }
 
-    }
+    })
   }
 
   override fun initialize(){
+    super.initialize()
 
     val uiManagerModule = reactContext.getNativeModule(UIManagerModule::class.java)
-
-    val uiManagerModuleListener = UIManagerModuleListener {
-      fun willDispatchViewUpdates(uiManagerModule: UIManagerModule) {
-        uiManagerModule.prependUIBlock(UIBlock {
-          fun execute(nativeViewHierarchyManager: NativeViewHierarchyManager) {
+    val uiManagerModuleListener = object : UIManagerModuleListener {
+      override fun willDispatchViewUpdates(uiManagerModule: UIManagerModule) {
+        uiManagerModule.prependUIBlock(object : UIBlock {
+          override fun execute(nativeViewHierarchyManager: NativeViewHierarchyManager) {
             preWillDispatchViewUpdates(uiManagerModule)
           }
         })
       }
     }
 
-    val layoutUpdateListener = UIImplementation.LayoutUpdateListener {
-      fun onLayoutUpdated(root: ReactShadowNode<*>) {
+    val layoutUpdateListener = object : UIImplementation.LayoutUpdateListener {
+      override fun onLayoutUpdated(root: ReactShadowNode<*>) {
         onLayoutUpdated(uiManagerModule)
       }
     }
@@ -121,7 +111,7 @@ class BidirectionalListModule(val reactContext: ReactApplicationContext) : React
   }
 
   override fun getName(): String {
-      return "BidirectionalList"
+    return "BidirectionalList"
   }
 
 }

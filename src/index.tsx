@@ -1,23 +1,9 @@
-import { NativeModules, Platform } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { NativeModules } from 'react-native';
 
-const LINKING_ERROR =
-  `The package 'react-native-bidirectional-list' doesn't seem to be linked. Make sure: \n\n` +
-  Platform.select({ ios: "- You have run 'pod install'\n", default: '' }) +
-  '- You rebuilt the app after installing the package\n' +
-  '- You are not using Expo managed workflow\n';
+const BidirectionalList = NativeModules.BidirectionalList;
 
-const BidirectionalList = NativeModules.BidirectionalList
-  ? NativeModules.BidirectionalList
-  : new Proxy(
-      {},
-      {
-        get() {
-          throw new Error(LINKING_ERROR);
-        },
-      }
-    );
-
-export function enableMVCP(
+function enableMVCP(
   viewTag: number,
   autoscrollToTopThreshold: number,
   minIndexForVisible: number
@@ -27,4 +13,57 @@ export function enableMVCP(
     autoscrollToTopThreshold,
     minIndexForVisible
   );
+}
+
+function disableMVCP(viewTag: number) {
+  return BidirectionalList.disableMVCP(viewTag);
+}
+
+export function withMVCP(Component, scrollViewTagExtractor) {
+  return React.forwardRef((props, forwardRef) => {
+    const { maintainVisibleContentPosition: mvcp } = props;
+    const { autoscrollToTopThreshold, minIndexForVisible } = mvcp ?? {};
+    const refViewTag = useRef();
+
+    const refCallback = (ref) => {
+      refViewTag.current = scrollViewTagExtractor(ref);
+      if (typeof forwardRef === 'function') {
+        forwardRef(ref);
+      } else if (forwardRef) {
+        forwardRef.current = ref;
+      }
+    };
+
+    useEffect(() => {
+      return () => {
+        const viewTag = refViewTag.current;
+        if (viewTag) disableMVCP(viewTag);
+      };
+    }, []);
+
+    useEffect(() => {
+      const viewTag = refViewTag.current;
+      if (!viewTag) return;
+      if (
+        autoscrollToTopThreshold !== undefined ||
+        minIndexForVisible !== undefined
+      ) {
+        enableMVCP(
+          viewTag,
+          autoscrollToTopThreshold ?? -Number.MAX_SAFE_INTEGER,
+          minIndexForVisible ?? 0
+        );
+      } else {
+        disableMVCP(viewTag);
+      }
+    }, [autoscrollToTopThreshold, minIndexForVisible]);
+
+    return (
+      <Component
+        ref={refCallback}
+        {...props}
+        maintainVisibleContentPosition={undefined}
+      />
+    );
+  });
 }
